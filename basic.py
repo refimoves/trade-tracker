@@ -8,8 +8,8 @@ import pandas as pd
 # ================== CONFIG (from GitHub Secrets) ==================
 BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
 BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
-NOTION_TOKEN = os.getenv("NOTION_API_KEY")       # changed here
-NOTION_DB_ID = os.getenv("NOTION_DATABASE_ID")   # and here
+NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+NOTION_DB_ID = os.getenv("NOTION_DB_ID")
 LIMIT = 50
 CLEAR_DB_BEFORE_UPDATE = True
 # ================================================================
@@ -22,19 +22,25 @@ def sign_request(string_to_sign):
     return hmac.new(
         BYBIT_API_SECRET.encode("utf-8"),
         string_to_sign.encode("utf-8"),
-        hashlib.sha256,
+        hashlib.sha256
     ).hexdigest()
 
 
 # ---- Detect all symbols with trades ----
 def get_traded_symbols(limit=LIMIT):
+    print("Fetching Bybit trades...")
+    print("API Key:", BYBIT_API_KEY[:8] + "********")
     possible_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "ADAUSDT", "XRPUSDT"]
     traded_symbols = set()
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
     for sym in possible_symbols:
-        params = {"category": "spot", "symbol": sym, "limit": str(limit)}
+        params = {
+            "category": "spot",
+            "symbol": sym,
+            "limit": str(limit)
+        }
         query = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
         string_to_sign = timestamp + BYBIT_API_KEY + recv_window + query
         signature = sign_request(string_to_sign)
@@ -42,10 +48,19 @@ def get_traded_symbols(limit=LIMIT):
             "X-BAPI-API-KEY": BYBIT_API_KEY,
             "X-BAPI-TIMESTAMP": timestamp,
             "X-BAPI-RECV-WINDOW": recv_window,
-            "X-BAPI-SIGN": signature,
+            "X-BAPI-SIGN": signature
         }
-        url = f"{BASE_URL}/v5/execution/list?{query}"
-        response = requests.get(url, headers=headers)
+        url = f"{BASE_URL}/v5/execution/list"
+
+        # --- Debug section ---
+        response = requests.get(url, headers=headers, params=params)
+        print(f"🔍 Checking {sym}: status={response.status_code}")
+        try:
+            print("Response:", response.text[:400])  # limit output size
+        except Exception as e:
+            print("Error printing response:", e)
+        # ---------------------
+
         if response.status_code != 200:
             continue
         data = response.json()
@@ -62,7 +77,11 @@ def get_bybit_trades(symbol, limit=LIMIT):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    params = {"category": "spot", "symbol": symbol, "limit": str(limit)}
+    params = {
+        "category": "spot",
+        "symbol": symbol,
+        "limit": str(limit)
+    }
     query = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
     string_to_sign = timestamp + BYBIT_API_KEY + recv_window + query
     signature = sign_request(string_to_sign)
@@ -70,13 +89,14 @@ def get_bybit_trades(symbol, limit=LIMIT):
         "X-BAPI-API-KEY": BYBIT_API_KEY,
         "X-BAPI-TIMESTAMP": timestamp,
         "X-BAPI-RECV-WINDOW": recv_window,
-        "X-BAPI-SIGN": signature,
+        "X-BAPI-SIGN": signature
     }
 
     url = f"{endpoint}?{query}"
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
-        raise Exception(f"Bybit API error {response.status_code}: {response.text}")
+        print(f"⚠️ Bybit API error {response.status_code}: {response.text}")
+        return []
 
     data = response.json()
     trades_list = data.get("result", {}).get("list", [])
@@ -92,24 +112,17 @@ def get_bybit_trades(symbol, limit=LIMIT):
         fee_crypto = float(t.get("execFee", 0))
         fee_usd = fee_crypto * price if fee_crypto > 0 else 0
 
-        trades.append(
-            {
-                "Symbol": t.get("symbol", ""),
-                "Side": t.get("side", ""),
-                "Qty": qty,
-                "Entry Price": price,
-                "Exec Time": exec_time,
-                "Fee $": fee_usd,
-            }
-        )
+        trades.append({
+            "Symbol": t.get("symbol", ""),
+            "Side": t.get("side", ""),
+            "Qty": qty,
+            "Entry Price": price,
+            "Exec Time": exec_time,
+            "Fee $": fee_usd
+        })
 
     return trades
 
-print("Fetching Bybit trades...")
-print("API Key:", BYBIT_API_KEY[:4], "********")
-response = requests.get(url, headers=headers, params=params)
-print("Response status:", response.status_code)
-print("Response text:", response.text)
 
 # ---- Map Bybit symbol to Coinbase ----
 def bybit_to_coinbase(symbol):
@@ -121,8 +134,6 @@ def get_prices(symbols):
     prices = {}
     for s in symbols:
         coin = bybit_to_coinbase(s)
-
-        # Try Coinbase first
         url_cb = f"https://api.coinbase.com/v2/prices/{coin}-USD/spot"
         try:
             response = requests.get(url_cb, timeout=5)
@@ -130,10 +141,9 @@ def get_prices(symbols):
                 data = response.json()
                 prices[s] = float(data["data"]["amount"])
                 continue
-        except:
+        except Exception:
             pass
 
-        # Fallback: Bybit
         url_bb = f"{BASE_URL}/spot/v3/public/quote/ticker/price?symbol={s}"
         try:
             response = requests.get(url_bb, timeout=5)
@@ -141,10 +151,9 @@ def get_prices(symbols):
                 data = response.json()
                 prices[s] = float(data["result"]["price"])
                 continue
-        except:
+        except Exception:
             pass
 
-        # Still nothing
         prices[s] = 0.0
         print(f"⚠️ Could not fetch price for {s}")
     return prices
@@ -155,55 +164,41 @@ def build_trade_pnl():
     symbols = get_traded_symbols()
     print("Detected symbols with trades:", symbols)
     all_trades = []
+    if not symbols:
+        return pd.DataFrame()
+
     prices = get_prices(symbols)
 
     for s in symbols:
         trades = get_bybit_trades(s)
-        current_price = prices[s]
-
+        current_price = prices.get(s, 0)
         for t in trades:
             entry_value = t["Qty"] * t["Entry Price"]
             current_value = t["Qty"] * current_price
-            pnl = (
-                (current_value - entry_value)
-                if t["Side"] == "Buy"
-                else (entry_value - current_value)
-            )
+            pnl = (current_value - entry_value) if t["Side"] == "Buy" else (entry_value - current_value)
             pnl_after_fee = pnl - t["Fee $"]
-            pnl_pct = pnl / entry_value if entry_value != 0 else 0
-            pnl_pct_after_fee = pnl_after_fee / entry_value if entry_value != 0 else 0
+            pnl_pct = (pnl / entry_value * 100) if entry_value != 0 else 0
+            pnl_pct_after_fee = (pnl_after_fee / entry_value * 100) if entry_value != 0 else 0
 
-            # Emoji display
-            emoji = "🟢" if pnl_after_fee >= 0 else "🔴"
+            emoji = "🟢" if pnl_pct_after_fee >= 0 else "🔴"
 
             t["Entry Value $"] = entry_value
             t["Current Price $"] = current_price
             t["Current Value $"] = current_value
             t["PnL $"] = pnl
-            t["PnL %"] = pnl_pct * 100
+            t["PnL %"] = pnl_pct
             t["PnL after Fee $"] = pnl_after_fee
-            t["PnL after Fee %"] = f"{emoji} {round(pnl_pct_after_fee * 100, 2)}%"
+            t["PnL after Fee %"] = f"{emoji} {round(pnl_pct_after_fee, 2)}%"
 
             all_trades.append(t)
 
     df = pd.DataFrame(all_trades)
     expected_cols = [
-        "Symbol",
-        "Side",
-        "Qty",
-        "Entry Price",
-        "Entry Value $",
-        "Current Price $",
-        "Current Value $",
-        "Fee $",
-        "PnL $",
-        "PnL %",
-        "PnL after Fee $",
-        "PnL after Fee %",
-        "Exec Time",
+        "Symbol", "Side", "Qty", "Entry Price", "Entry Value $",
+        "Current Price $", "Current Value $", "Fee $",
+        "PnL $", "PnL %", "PnL after Fee $", "PnL after Fee %", "Exec Time"
     ]
-    df = df.reindex(columns=expected_cols)
-    return df
+    return df.reindex(columns=expected_cols)
 
 
 # ---- Clear Notion database ----
@@ -212,7 +207,7 @@ def clear_notion_database():
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
     response = requests.post(url, headers=headers, json={})
     data = response.json()
@@ -222,7 +217,7 @@ def clear_notion_database():
         requests.patch(
             f"https://api.notion.com/v1/pages/{page_id}",
             headers=headers,
-            json={"archived": True},
+            json={"archived": True}
         )
 
 
@@ -232,7 +227,7 @@ def push_to_notion(df):
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28",
+        "Notion-Version": "2022-06-28"
     }
 
     for _, row in df.iterrows():
@@ -250,14 +245,10 @@ def push_to_notion(df):
                 "PnL $": {"number": row["PnL $"]},
                 "PnL %": {"number": row["PnL %"]},
                 "PnL after Fee $": {"number": row["PnL after Fee $"]},
-                "PnL after Fee %": {
-                    "rich_text": [{"text": {"content": str(row["PnL after Fee %"])}}]
-                },
+                "PnL after Fee %": {"rich_text": [{"text": {"content": str(row["PnL after Fee %"])}}]},
                 "Exec Time": {
                     "date": {
-                        "start": row["Exec Time"].isoformat()
-                        if pd.notnull(row["Exec Time"])
-                        else None
+                        "start": row["Exec Time"].isoformat() if pd.notnull(row["Exec Time"]) else None
                     }
                 },
             },
@@ -272,7 +263,10 @@ if __name__ == "__main__":
     df = build_trade_pnl()
     print(df)
 
-    if CLEAR_DB_BEFORE_UPDATE:
-        clear_notion_database()
-
-    push_to_notion(df)
+    if df.empty:
+        print("⚠️ No trades found or API returned empty results.")
+    else:
+        if CLEAR_DB_BEFORE_UPDATE:
+            clear_notion_database()
+        push_to_notion(df)
+        print("✅ Sync complete.")
