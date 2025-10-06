@@ -8,8 +8,8 @@ import pandas as pd
 # ================== CONFIG (from GitHub Secrets) ==================
 BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
 BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-NOTION_DB_ID = os.getenv("NOTION_DB_ID")
+NOTION_TOKEN = os.getenv("NOTION_API_KEY")       # changed here
+NOTION_DB_ID = os.getenv("NOTION_DATABASE_ID")   # and here
 LIMIT = 50
 CLEAR_DB_BEFORE_UPDATE = True
 # ================================================================
