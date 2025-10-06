@@ -105,6 +105,11 @@ def get_bybit_trades(symbol, limit=LIMIT):
 
     return trades
 
+print("Fetching Bybit trades...")
+print("API Key:", BYBIT_API_KEY[:4], "********")
+response = requests.get(url, headers=headers, params=params)
+print("Response status:", response.status_code)
+print("Response text:", response.text)
 
 # ---- Map Bybit symbol to Coinbase ----
 def bybit_to_coinbase(symbol):
