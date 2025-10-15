@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "crypto_daily"
+version = "0.1.0"
+description = "Daily crypto trading updates -> Notion via OpenRouter"
+requires-python = ">=3.10"

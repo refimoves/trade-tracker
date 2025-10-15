@@ -1,0 +1,13 @@
+httpx==0.27.2
+pydantic==2.9.2
+pandas==2.2.3
+numpy==2.1.2
+python-dateutil==2.9.0.post0
+ta==0.11.0
+TA-Lib==0.4.32
+scipy==1.14.1
+matplotlib==3.9.2
+notion-client==2.2.1
+openai==1.51.0
+backoff==2.2.1
+python-dotenv==1.0.1
